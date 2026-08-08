@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend",
+      "runtimeExecutable": "D:\\Projects\\komek\\backend\\.venv\\Scripts\\uvicorn.exe",
+      "runtimeArgs": ["app.main:app", "--app-dir", "D:\\Projects\\komek\\backend", "--port", "8000"],
+      "port": 8000
+    },
+    {
+      "name": "admin-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "D:\\Projects\\komek\\web", "run", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "mobile-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "D:\\Projects\\komek\\mobile", "run", "web", "--", "--port", "8081"],
+      "port": 8081
+    }
+  ]
+}

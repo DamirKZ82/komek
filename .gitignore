@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Env / secrets
+.env
+!.env.example
+
+# Node / Expo / Next.js
+node_modules/
+.expo/
+dist/
+web-build/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# Локальные переменные окружения
+.env.local
+.env.*.local
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+backend/komek_dev.db
+backend/var/
