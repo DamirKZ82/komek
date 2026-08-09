@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     # --- Бизнес-правила ---
     default_currency: str = "KZT"
     default_city_code: str = "astana"
+    # Центр Астаны — фолбэк для карты и заглушки геокодинга.
+    default_city_latitude: float = 51.1282
+    default_city_longitude: float = 71.4307
     # Гибридная монетизация (п. 5.8 ТЗ):
     # типы B/C — комиссия 15% с исполнителя при выплате;
     # тип A (подбор постоянного исполнителя) — разовый fee с заказчика, без комиссии.
@@ -68,6 +71,13 @@ class Settings(BaseSettings):
     review_edit_window_hours: int = 48
     # Заказ считается срочным, если до начала меньше этого времени.
     urgent_order_threshold_hours: int = 12
+
+    # --- 2GIS (п. 6 ТЗ) ---
+    # Ключ Catalog API (подсказки и геокодинг) — только на сервере.
+    dgis_catalog_key: str | None = None
+    # Ключ MapGL для отрисовки карты в приложении. Публичный по своей природе,
+    # ограничивается доменом/приложением в Platform Manager; отдаётся клиенту.
+    dgis_map_key: str | None = None
 
     # --- Платёжный шлюз: Kaspi Pay / эквайринг банка (п. 5.5 ТЗ) ---
     # Пусто → sandbox-режим (запрещён в production).

@@ -2,8 +2,8 @@
  * Создание заказа. Два сценария (п. 5.1 ТЗ):
  * с providerId — прямой заказ исполнителю, без — публикация заявки на биржу.
  */
-import { Stack, router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 import {
   Button,
@@ -14,6 +14,7 @@ import {
   TextInput,
 } from 'react-native-paper';
 
+import { takePickedAddress, type PickedAddress } from '@/lib/addressDraft';
 import { api, ApiError, type Category, type Order, type Service } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
@@ -49,8 +50,17 @@ export default function NewOrderScreen() {
   const [comment, setComment] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [address, setAddress] = useState<PickedAddress | null>(null);
 
   const days = useMemo(() => nextDays(7), []);
+
+  // Возврат с экрана карты: забираем выбранную точку.
+  useFocusEffect(
+    useCallback(() => {
+      const picked = takePickedAddress();
+      if (picked) setAddress(picked);
+    }, []),
+  );
 
   useEffect(() => {
     (async () => {
@@ -73,6 +83,21 @@ export default function NewOrderScreen() {
       const end = new Date(start);
       end.setHours(start.getHours() + Number(duration || '2'));
 
+      // Адрес сохраняем в книгу заказчика и передаём заказу ссылкой:
+      // в заказе он ещё и снимком, чтобы правки не меняли историю.
+      let addressId: string | undefined;
+      if (address) {
+        const created = await api<{ id: string }>('/me/addresses', {
+          method: 'POST',
+          body: {
+            street: address.address ?? `${address.latitude}, ${address.longitude}`,
+            latitude: address.latitude,
+            longitude: address.longitude,
+          },
+        });
+        addressId = created.id;
+      }
+
       await api<Order>('/orders', {
         method: 'POST',
         body: {
@@ -82,6 +107,7 @@ export default function NewOrderScreen() {
           scheduled_end: end.toISOString(),
           price_unit: 'hour',
           unit_price: providerId ? undefined : price,
+          address_id: addressId,
           comment: comment || undefined,
         },
       });
@@ -141,6 +167,22 @@ export default function NewOrderScreen() {
           mode="outlined"
           style={styles.label}
         />
+
+        <Button
+          mode="outlined"
+          icon="map-marker-outline"
+          onPress={() =>
+            router.push({
+              pathname: '/address/pick',
+              params: address
+                ? { lat: String(address.latitude), lon: String(address.longitude) }
+                : {},
+            })
+          }
+          style={styles.label}
+        >
+          {address ? (address.address ?? t('pickOnMap')) : t('pickOnMap')}
+        </Button>
 
         {!providerId ? (
           <TextInput

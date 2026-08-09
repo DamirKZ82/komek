@@ -175,6 +175,8 @@ def build_card(profile: ProviderProfile, is_favorite: bool = False) -> ProviderC
         min_price=min_offer.price if min_offer else None,
         price_unit=min_offer.price_unit if min_offer else None,
         accepts_urgent=profile.accepts_urgent,
+        base_latitude=profile.base_latitude,
+        base_longitude=profile.base_longitude,
         languages=[pl.language for pl in profile.languages],
         is_favorite=is_favorite,
     )

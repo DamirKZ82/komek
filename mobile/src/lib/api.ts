@@ -166,6 +166,8 @@ export interface ProviderCard {
   min_price: string | null;
   price_unit: string | null;
   accepts_urgent: boolean;
+  base_latitude: number | null;
+  base_longitude: number | null;
   languages: string[];
   is_favorite: boolean;
 }
@@ -301,6 +303,20 @@ export interface MyProviderProfile extends ProviderDetail {
 
 export async function setFavorite(providerId: string, value: boolean): Promise<void> {
   await api(`/providers/${providerId}/favorite`, { method: value ? 'PUT' : 'DELETE' });
+}
+
+export interface MapConfig {
+  map_key: string | null;
+  center_latitude: number;
+  center_longitude: number;
+}
+
+export interface AddressSuggestion {
+  id: string | null;
+  name: string;
+  full_name: string;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 export interface Placement {

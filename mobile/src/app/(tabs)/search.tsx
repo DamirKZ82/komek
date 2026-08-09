@@ -8,9 +8,11 @@ import {
   Card,
   Chip,
   FAB,
+  SegmentedButtons,
   Text,
 } from 'react-native-paper';
 
+import { MapView } from '@/components/MapView';
 import { api, type Category, type Page, type ProviderCard, type Service } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
@@ -20,6 +22,7 @@ export default function SearchScreen() {
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [urgentOnly, setUrgentOnly] = useState(false);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [providers, setProviders] = useState<ProviderCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -113,8 +116,36 @@ export default function SearchScreen() {
     );
   };
 
+  // На карту попадают только исполнители с указанной базовой точкой.
+  const mapMarkers = providers
+    .filter((item) => item.base_latitude !== null && item.base_longitude !== null)
+    .map((item) => ({
+      id: item.user_id,
+      latitude: item.base_latitude as number,
+      longitude: item.base_longitude as number,
+      label: [item.first_name, item.last_name].filter(Boolean).join(' ') || undefined,
+    }));
+
   return (
     <View style={styles.container}>
+      <SegmentedButtons
+        value={viewMode}
+        onValueChange={(value) => setViewMode(value as 'list' | 'map')}
+        buttons={[
+          { value: 'list', label: t('list'), icon: 'view-list' },
+          { value: 'map', label: t('map'), icon: 'map-outline' },
+        ]}
+        style={styles.viewToggle}
+      />
+      {viewMode === 'map' ? (
+        <MapView
+          style={styles.map}
+          markers={mapMarkers}
+          onMarkerPress={(id) =>
+            router.push({ pathname: '/provider/[id]', params: { id } })
+          }
+        />
+      ) : (
       <FlatList
         data={providers}
         keyExtractor={(item) => item.user_id}
@@ -169,6 +200,7 @@ export default function SearchScreen() {
         }
         contentContainerStyle={styles.list}
       />
+      )}
       <FAB
         icon="plus"
         label={t('newOrder')}
@@ -185,6 +217,8 @@ const styles = StyleSheet.create({
   filters: { marginBottom: 8, gap: 8 },
   filterChip: { marginRight: 8 },
   toggleRow: { flexDirection: 'row', gap: 8, alignSelf: 'flex-start' },
+  viewToggle: { margin: 12, marginBottom: 0 },
+  map: { flex: 1, margin: 12, borderRadius: 12 },
   card: { marginBottom: 12 },
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   empty: { textAlign: 'center', marginTop: 48, opacity: 0.6 },

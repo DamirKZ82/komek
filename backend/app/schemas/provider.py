@@ -75,6 +75,9 @@ class ProviderCard(BaseModel):
     min_price: Decimal | None
     price_unit: PriceUnit | None
     accepts_urgent: bool
+    # Базовая точка для отображения на карте (п. 6 ТЗ). Точный адрес не раскрываем.
+    base_latitude: float | None = None
+    base_longitude: float | None = None
     languages: list[Language] = []
     is_favorite: bool = False
 

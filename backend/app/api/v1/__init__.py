@@ -7,6 +7,7 @@ from app.api.v1 import (
     chats,
     complaints,
     documents,
+    geo,
     orders,
     placements,
     providers,
@@ -19,6 +20,7 @@ router = APIRouter()
 router.include_router(auth.router)
 router.include_router(users.router)
 router.include_router(catalog.router)
+router.include_router(geo.router)
 router.include_router(providers.router)
 router.include_router(orders.router)
 router.include_router(placements.router)
