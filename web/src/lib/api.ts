@@ -208,6 +208,12 @@ export interface PromoCode {
   is_active: boolean;
 }
 
+export interface Reconciliation {
+  paid_without_capture: string[];
+  stale_holds: { order: string; amount: string }[];
+  failed_payments: { order: string; error: string | null }[];
+}
+
 export interface CancellationRule {
   id: string;
   hours_before: number;

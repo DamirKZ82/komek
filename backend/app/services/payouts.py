@@ -22,6 +22,7 @@ from app.models.order import Order
 from app.models.payment import Payout, PayoutItem
 from app.models.user import User
 from app.services.notifications import notify_user
+from app.services.payment_gateway import get_payment_gateway
 
 
 async def build_payout_registry(session: AsyncSession) -> list[Payout]:
@@ -113,7 +114,22 @@ async def mark_payout_paid(
     if payout.status == PayoutStatus.PAID:
         raise ConflictError("Уже выплачено", code="already_paid")
     # TODO(acquiring): фактический перевод на карту/Kaspi исполнителя.
+    # Реквизиты исполнителя (карта/Kaspi) появятся вместе с формой выплат;
+    # пока платим на маскированный destination, если он заполнен.
+    result = await get_payment_gateway().payout(
+        amount=payout.amount,
+        destination=payout.destination_mask or str(payout.provider_user_id),
+        idempotency_key=f"payout-{payout.id}",
+    )
+    if not result.success:
+        payout.status = PayoutStatus.FAILED
+        payout.error_message = result.error_message
+        raise ConflictError(
+            result.error_message or "Эквайер отклонил выплату", code="payout_failed"
+        )
+
     payout.status = PayoutStatus.PAID
+    payout.psp_reference = result.psp_reference
     payout.executed_at = datetime.now(UTC)
     await notify_user(
         session,

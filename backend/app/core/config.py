@@ -69,6 +69,17 @@ class Settings(BaseSettings):
     # Заказ считается срочным, если до начала меньше этого времени.
     urgent_order_threshold_hours: int = 12
 
+    # --- Платёжный шлюз: Kaspi Pay / эквайринг банка (п. 5.5 ТЗ) ---
+    # Пусто → sandbox-режим (запрещён в production).
+    payment_api_url: str | None = None
+    payment_api_key: str | None = None
+    # Секрет для проверки HMAC-подписи вебхуков эквайера.
+    payment_webhook_secret: str | None = None
+    # Куда эквайер шлёт callback: https://api.komek.kz/api/v1/webhooks/payments
+    payment_webhook_url: str | None = None
+    # Допустимый возраст вебхука в секундах — защита от replay-атак.
+    payment_webhook_max_age_seconds: int = 300
+
     # --- KYC-провайдер: liveness + распознавание удостоверения (п. 4.2 ТЗ) ---
     # Пусто → заглушка, которая принимает любую сессию (только вне production).
     kyc_api_url: str | None = None

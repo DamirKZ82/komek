@@ -37,7 +37,7 @@ from app.schemas.review import ReviewOut
 from app.services import moderation as moderation_service
 from app.services import payouts as payout_service
 from app.services.reviews import recalc_provider_rating
-from app.services.stats import collect_stats
+from app.services.stats import collect_reconciliation, collect_stats
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -415,3 +415,9 @@ async def toggle_promo_code(
 @router.get("/stats")
 async def stats(staff: CurrentStaff, session: SessionDep) -> dict[str, Any]:
     return await collect_stats(session)
+
+
+@router.get("/reconciliation")
+async def reconciliation(staff: CurrentStaff, session: SessionDep) -> dict[str, Any]:
+    """Расхождения между заказами и платежами — для ручного разбора финансистом."""
+    return await collect_reconciliation(session)

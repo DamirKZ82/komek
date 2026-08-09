@@ -2,7 +2,64 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { api, ApiError, type Page, type Payout } from '@/lib/api';
+import { api, ApiError, type Page, type Payout, type Reconciliation } from '@/lib/api';
+
+function ReconciliationSection() {
+  const [data, setData] = useState<Reconciliation | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api<Reconciliation>('/admin/reconciliation')
+      .then(setData)
+      .catch((e) => setError(e instanceof ApiError ? e.message : 'Ошибка'));
+  }, []);
+
+  if (error) return <div className="error">{error}</div>;
+  if (!data) return null;
+
+  const total =
+    data.paid_without_capture.length + data.stale_holds.length + data.failed_payments.length;
+
+  return (
+    <div className="card">
+      <h3>Сверка с эквайрингом</h3>
+      {total === 0 ? (
+        <div className="muted">Расхождений нет 🎉</div>
+      ) : (
+        <table>
+          <tbody>
+            {data.stale_holds.map((item) => (
+              <tr key={`hold-${item.order}`}>
+                <td>
+                  <span className="badge warn">зависший холд</span>
+                </td>
+                <td>{item.order}</td>
+                <td>{Number(item.amount).toLocaleString('ru-RU')} ₸</td>
+              </tr>
+            ))}
+            {data.paid_without_capture.map((code) => (
+              <tr key={`nocapture-${code}`}>
+                <td>
+                  <span className="badge danger">оплачен без списания</span>
+                </td>
+                <td colSpan={2}>{code}</td>
+              </tr>
+            ))}
+            {data.failed_payments.map((item) => (
+              <tr key={`failed-${item.order}`}>
+                <td>
+                  <span className="badge danger">платёж отклонён</span>
+                </td>
+                <td>{item.order}</td>
+                <td>{item.error ?? ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
 
 const STATUS_LABELS: Record<string, string> = {
   scheduled: 'к выплате',
@@ -74,11 +131,13 @@ export default function FinancePage() {
         </button>
       </div>
       <p className="muted" style={{ marginBottom: 16 }}>
-        Комиссия 15% удерживается при выплате (типы B/C, п. 5.8 ТЗ). Перевод денег — вручную
-        до подключения эквайринга.
+        Комиссия 15% удерживается при выплате (типы B/C, п. 5.8 ТЗ). «Отметить выплаченным»
+        отправляет перевод через эквайер; без настроенных ключей работает песочница.
       </p>
       {notice ? <div className="card">{notice}</div> : null}
       {error ? <div className="error">{error}</div> : null}
+
+      <ReconciliationSection />
 
       {payouts.map((payout) => (
         <div className="card" key={payout.id}>

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -30,6 +31,9 @@ from app.models.payment import Payment
 from app.models.placement import Placement
 from app.models.user import User
 from app.services.notifications import notify_user
+from app.services.payment_gateway import get_payment_gateway
+
+logger = logging.getLogger("komek.billing")
 
 # Пересчёт тарифа исполнителя в месячную ставку для расчёта fee (ориентир):
 # смена ≈ 22 рабочих дня, час ≈ 8 часов × 22 дня.
@@ -83,23 +87,59 @@ async def setup_order_billing(session: AsyncSession, order: Order) -> None:
             placement.guarantee_until = prior.guarantee_until  # гарантия не продлевается
         session.add(placement)
     else:
-        # Типы B/C: оплата только через платформу.
-        # TODO(acquiring): здесь создаётся холд через Kaspi Pay / эквайринг.
-        session.add(
-            Payment(
-                order_id=order.id,
-                payer_id=order.customer_id,
-                provider=PaymentProvider.CARD,
-                status=PaymentStatus.HELD,
-                amount=order.estimated_total,
-                held_at=datetime.now(UTC),
-                idempotency_key=f"hold-{order.id}",
-            )
+        # Типы B/C: оплата только через платформу — холдируем сумму заказа.
+        await authorize_order_hold(session, order)
+
+
+async def authorize_order_hold(session: AsyncSession, order: Order) -> Payment:
+    """Холд суммы заказа через эквайер. Идемпотентен по ключу hold-<order_id>."""
+    idempotency_key = f"hold-{order.id}"
+    existing = await session.scalar(
+        sa.select(Payment).where(Payment.idempotency_key == idempotency_key)
+    )
+    if existing is not None:
+        return existing
+
+    result = await get_payment_gateway().authorize(
+        amount=order.estimated_total,
+        currency=order.currency,
+        idempotency_key=idempotency_key,
+        description=f"Заказ {order.code}",
+    )
+
+    if result.pending:
+        status = PaymentStatus.PENDING
+    elif result.success:
+        status = PaymentStatus.HELD
+    else:
+        status = PaymentStatus.FAILED
+
+    payment = Payment(
+        order_id=order.id,
+        payer_id=order.customer_id,
+        provider=PaymentProvider.CARD,
+        status=status,
+        amount=order.estimated_total,
+        psp_reference=result.psp_reference,
+        card_mask=result.card_mask,
+        idempotency_key=idempotency_key,
+        held_at=datetime.now(UTC) if status == PaymentStatus.HELD else None,
+        error_message=result.error_message,
+        payload=result.payload or None,
+    )
+    session.add(payment)
+    await session.flush()
+
+    if status == PaymentStatus.FAILED:
+        raise ConflictError(
+            result.error_message or "Не удалось захолдировать оплату",
+            code="payment_authorization_failed",
         )
+    return payment
 
 
 async def pay_order(session: AsyncSession, customer: User, order_id: uuid.UUID) -> Order:
-    """Списание после чек-аута (типы B/C). Пока шлюза нет — имитация capture."""
+    """Списание после чек-аута (типы B/C): capture холда на фактическую сумму."""
     order = await session.get(Order, order_id, with_for_update=True)
     if order is None or order.customer_id != customer.id:
         raise NotFoundError("Заказ не найден")
@@ -108,28 +148,56 @@ async def pay_order(session: AsyncSession, customer: User, order_id: uuid.UUID) 
 
     payment = await session.scalar(
         sa.select(Payment).where(
-            Payment.order_id == order_id, Payment.status == PaymentStatus.HELD
+            Payment.order_id == order_id,
+            Payment.status.in_([PaymentStatus.HELD, PaymentStatus.PENDING]),
         )
     )
+    if payment is None:
+        # Холда нет (например, заказ создан до подключения оплаты) — делаем его сейчас.
+        payment = await authorize_order_hold(session, order)
+
     now = datetime.now(UTC)
-    # TODO(acquiring): capture холда на сумму final_total, разницу — вернуть.
-    if payment is not None:
-        payment.status = PaymentStatus.CAPTURED
-        payment.captured_amount = order.final_total
-        payment.captured_at = now
-    else:
-        session.add(
-            Payment(
-                order_id=order.id,
-                payer_id=customer.id,
-                provider=PaymentProvider.CARD,
-                status=PaymentStatus.CAPTURED,
-                amount=order.final_total or order.estimated_total,
-                captured_amount=order.final_total,
-                captured_at=now,
-                idempotency_key=f"capture-{order.id}",
-            )
+    amount = order.final_total or order.estimated_total
+    gateway = get_payment_gateway()
+
+    if payment.psp_reference is None:
+        raise ConflictError("Платёж не подтверждён эквайером", code="payment_not_authorized")
+
+    result = await gateway.capture(
+        psp_reference=payment.psp_reference,
+        amount=amount,
+        idempotency_key=f"capture-{order.id}",
+    )
+    if not result.success:
+        payment.error_message = result.error_message
+        raise ConflictError(
+            result.error_message or "Не удалось списать оплату", code="payment_capture_failed"
         )
+
+    if result.pending:
+        # Итог придёт вебхуком: заказ пока не переводим в PAID.
+        payment.status = PaymentStatus.PENDING
+        raise ConflictError(
+            "Платёж обрабатывается, подтверждение придёт в течение нескольких минут",
+            code="payment_pending",
+            status_code=202,
+        )
+
+    payment.status = PaymentStatus.CAPTURED
+    payment.captured_amount = amount
+    payment.captured_at = now
+
+    # Если холд был больше фактической суммы, разницу возвращаем плательщику.
+    overhold = payment.amount - amount
+    if overhold > 0:
+        refund = await gateway.refund(
+            psp_reference=payment.psp_reference,
+            amount=overhold,
+            idempotency_key=f"overhold-refund-{order.id}",
+        )
+        if refund.success:
+            payment.refunded_amount = overhold
+            payment.refunded_at = now
 
     order.paid_at = now
     # Переход COMPLETED → PAID делает вызывающий модуль orders (стейт-машина там).
@@ -142,6 +210,71 @@ async def pay_order(session: AsyncSession, customer: User, order_id: uuid.UUID) 
             {"order_id": str(order.id)},
         )
     return order
+
+
+async def refund_order_hold(
+    session: AsyncSession, order: Order, penalty: Decimal
+) -> Payment | None:
+    """Возврат холда при отмене: заказчику возвращается сумма за вычетом штрафа.
+
+    Штраф остаётся на платформе как компенсация исполнителю за сорванный слот
+    (правила задаёт админ, п. 5.3 ТЗ). При отмене исполнителем штраф нулевой —
+    возвращается всё.
+    """
+    payment = await session.scalar(
+        sa.select(Payment).where(
+            Payment.order_id == order.id,
+            Payment.status.in_([PaymentStatus.HELD, PaymentStatus.PENDING]),
+        )
+    )
+    if payment is None or payment.psp_reference is None:
+        return None
+
+    refund_amount = payment.amount - penalty
+    if refund_amount <= 0:
+        # Штраф покрывает весь холд — списываем его целиком, возвращать нечего.
+        result = await get_payment_gateway().capture(
+            psp_reference=payment.psp_reference,
+            amount=payment.amount,
+            idempotency_key=f"penalty-capture-{order.id}",
+        )
+        if result.success:
+            payment.status = PaymentStatus.CAPTURED
+            payment.captured_amount = payment.amount
+            payment.captured_at = datetime.now(UTC)
+        return payment
+
+    result = await get_payment_gateway().refund(
+        psp_reference=payment.psp_reference,
+        amount=refund_amount,
+        idempotency_key=f"cancel-refund-{order.id}",
+    )
+    if not result.success:
+        payment.error_message = result.error_message
+        logger.warning(
+            "Не удалось вернуть холд по заказу %s: %s", order.code, result.error_message
+        )
+        return payment
+
+    now = datetime.now(UTC)
+    payment.refunded_amount = refund_amount
+    payment.refunded_at = now
+    if penalty > 0:
+        # Часть холда удержана — списываем её как штраф.
+        capture = await get_payment_gateway().capture(
+            psp_reference=payment.psp_reference,
+            amount=penalty,
+            idempotency_key=f"penalty-capture-{order.id}",
+        )
+        if capture.success:
+            payment.status = PaymentStatus.PARTIALLY_REFUNDED
+            payment.captured_amount = penalty
+            payment.captured_at = now
+        else:
+            payment.status = PaymentStatus.REFUNDED
+    else:
+        payment.status = PaymentStatus.REFUNDED
+    return payment
 
 
 # --- Fee за подбор (тип A) ----------------------------------------------------

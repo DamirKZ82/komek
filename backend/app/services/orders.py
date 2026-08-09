@@ -336,6 +336,11 @@ async def check_out(
     return order
 
 
+def transition_to_paid(order: Order, actor_id: uuid.UUID | None = None) -> None:
+    """Перевод в «оплачен» из вебхука эквайера — стейт-машина проверит допустимость."""
+    _transition(order, OrderStatus.PAID, actor_id, comment="Подтверждено эквайером")
+
+
 async def mark_paid(session: AsyncSession, customer: User, order_id: uuid.UUID) -> Order:
     """Оплата завершённого заказа (типы B/C). Списание — через billing (пока имитация)."""
     from app.services.billing import pay_order  # noqa: PLC0415 — разрыв цикла импортов
@@ -361,13 +366,20 @@ async def cancel_order(
         raise ForbiddenError()
 
     # Штраф по правилам админа — только при отмене заказчиком (у него холд средств).
-    if by == CancelledBy.CUSTOMER:
-        from app.services.cancellation import calculate_penalty  # noqa: PLC0415
+    # При отмене исполнителем или платформой заказчику возвращается всё.
+    from app.services.billing import refund_order_hold  # noqa: PLC0415 — разрыв цикла
+    from app.services.cancellation import calculate_penalty  # noqa: PLC0415
 
+    penalty = Decimal("0")
+    if by == CancelledBy.CUSTOMER:
         penalty = await calculate_penalty(session, order)
         if penalty > 0:
             order.cancellation_penalty = penalty
-            # TODO(acquiring): удержать штраф из холда, остаток вернуть.
+
+    # Возврат делаем до перевода в CANCELLED: если эквайер откажет, статус
+    # платежа сохранит ошибку, а заказ всё равно закроется — деньги дособерёт сверка.
+    if order.status in (OrderStatus.CONFIRMED, OrderStatus.IN_PROGRESS):
+        await refund_order_hold(session, order, penalty)
 
     order.cancelled_at = datetime.now(UTC)
     order.cancelled_by = by

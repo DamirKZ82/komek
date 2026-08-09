@@ -38,6 +38,7 @@ from app.models.verification import (
     VerificationInterview,
     VerificationRequest,
 )
+from app.models.webhook import WebhookEvent
 
 __all__ = [
     "Address",
@@ -79,4 +80,5 @@ __all__ = [
     "VerificationDocument",
     "VerificationInterview",
     "VerificationRequest",
+    "WebhookEvent",
 ]

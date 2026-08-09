@@ -12,6 +12,7 @@ from app.api.v1 import (
     providers,
     reviews,
     users,
+    webhooks,
 )
 
 router = APIRouter()
@@ -25,4 +26,5 @@ router.include_router(reviews.router)
 router.include_router(chats.router)
 router.include_router(complaints.router)
 router.include_router(documents.router)
+router.include_router(webhooks.router)
 router.include_router(admin.router)
