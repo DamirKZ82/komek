@@ -87,6 +87,19 @@ async def test_chat_photo_and_voice(client, tmp_path, monkeypatch):
     assert all("attachment_key" not in item for item in resp.json()["items"])
 
 
+async def verify_identity(client, headers) -> dict:
+    """Двухшаговый флоу: создать сессию KYC → подтвердить личность по ней."""
+    resp = await client.post("/api/v1/me/identity/session", headers=headers)
+    assert resp.status_code == 201, resp.text
+    session_id = resp.json()["session_id"]
+
+    resp = await client.post(
+        "/api/v1/me/identity", headers=headers, json={"session_id": session_id}
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
 async def test_customer_identity_verification(client):
     """Заглушка KYC подтверждает личность и выдаёт значок «проверенный»."""
     customer = await login(client, "+77017770004")
@@ -94,18 +107,65 @@ async def test_customer_identity_verification(client):
     resp = await client.get("/api/v1/me", headers=customer)
     assert resp.json()["identity_verified_at"] is None
 
-    resp = await client.post(
-        "/api/v1/me/identity", headers=customer, json={"session_token": "stub:900101300123"}
-    )
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["identity_verified_at"] is not None
+    body = await verify_identity(client, customer)
+    assert body["identity_verified_at"] is not None
 
-    # Повторное подтверждение — конфликт.
-    resp = await client.post(
-        "/api/v1/me/identity", headers=customer, json={"session_token": "stub:900101300123"}
-    )
+    # Повторное создание сессии после подтверждения — конфликт.
+    resp = await client.post("/api/v1/me/identity/session", headers=customer)
     assert resp.status_code == 409
     assert resp.json()["error"]["code"] == "already_verified"
+
+
+async def test_identity_requires_real_session(client):
+    """Клиент не может подтвердить личность чужой или выдуманной сессией."""
+    import uuid as uuid_module
+
+    customer = await login(client, "+77017770008")
+    resp = await client.post(
+        "/api/v1/me/identity",
+        headers=customer,
+        json={"session_id": str(uuid_module.uuid4())},
+    )
+    assert resp.status_code == 404
+
+    # Сессия другого пользователя тоже не подходит.
+    other = await login(client, "+77017770009")
+    resp = await client.post("/api/v1/me/identity/session", headers=other)
+    other_session = resp.json()["session_id"]
+
+    resp = await client.post(
+        "/api/v1/me/identity", headers=customer, json={"session_id": other_session}
+    )
+    assert resp.status_code == 404
+
+
+async def test_identity_session_not_reusable(client, session_factory):
+    """Использованную сессию нельзя применить повторно (например, на другом аккаунте)."""
+    import sqlalchemy as sa
+
+    from app.models.user import User
+
+    customer = await login(client, "+77017770010")
+    resp = await client.post("/api/v1/me/identity/session", headers=customer)
+    session_id = resp.json()["session_id"]
+
+    resp = await client.post(
+        "/api/v1/me/identity", headers=customer, json={"session_id": session_id}
+    )
+    assert resp.status_code == 200
+
+    # Снимаем отметку о верификации, чтобы проверить именно защиту сессии.
+    async with session_factory() as session:
+        await session.execute(
+            sa.update(User).where(User.phone == "+77017770010").values(identity_verified_at=None)
+        )
+        await session.commit()
+
+    resp = await client.post(
+        "/api/v1/me/identity", headers=customer, json={"session_id": session_id}
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "session_consumed"
 
 
 async def test_identity_badge_visible_to_provider(client):
@@ -115,9 +175,7 @@ async def test_identity_badge_visible_to_provider(client):
     resp = await client.get("/api/v1/chats", headers=provider)
     assert resp.json()[0]["peer"]["identity_verified"] is False
 
-    await client.post(
-        "/api/v1/me/identity", headers=customer, json={"session_token": "stub:900101300123"}
-    )
+    await verify_identity(client, customer)
 
     resp = await client.get("/api/v1/chats", headers=provider)
     assert resp.json()[0]["peer"]["identity_verified"] is True
@@ -131,10 +189,7 @@ async def test_provider_identity_grants_level_1(client):
     resp = await client.get("/api/v1/providers/me", headers=provider)
     assert resp.json()["verification_level"] == "level_0"
 
-    resp = await client.post(
-        "/api/v1/me/identity", headers=provider, json={"session_token": "stub:900101300123"}
-    )
-    assert resp.status_code == 200, resp.text
+    await verify_identity(client, provider)
 
     resp = await client.get("/api/v1/providers/me", headers=provider)
     assert resp.json()["verification_level"] == "level_1"

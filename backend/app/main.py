@@ -11,6 +11,7 @@ from app import __version__
 from app.api.v1 import router as v1_router
 from app.core.config import settings
 from app.core.errors import register_exception_handlers
+from app.db.middleware import DatabaseSessionMiddleware
 from app.db.session import engine
 
 
@@ -34,6 +35,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Сессия БД на запрос. Коммит здесь, а не в зависимости с yield: та выполняется
+# после отправки ответа, из-за чего клиент мог не увидеть только что созданные данные.
+app.add_middleware(DatabaseSessionMiddleware)
 
 register_exception_handlers(app)
 app.include_router(v1_router, prefix=settings.api_v1_prefix)

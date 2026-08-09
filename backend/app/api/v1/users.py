@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Request
@@ -18,21 +19,47 @@ from app.services import identity as identity_service
 router = APIRouter(prefix="/me", tags=["me"])
 
 
-class IdentityVerifyIn(BaseModel):
-    """Токен сессии KYC-провайдера, полученный мобильным SDK на устройстве."""
+class KycSessionOut(BaseModel):
+    """Данные для запуска мобильного SDK проверки личности."""
 
-    session_token: str = Field(min_length=4, max_length=512)
+    session_id: uuid.UUID
+    provider: str
+    client_token: str | None = None
+    sdk_url: str | None = None
+    expires_at: datetime
+
+
+class IdentityConfirmIn(BaseModel):
+    session_id: uuid.UUID
+
+
+@router.post("/identity/session", response_model=KycSessionOut, status_code=201)
+async def start_identity_session(user: CurrentUser, session: SessionDep) -> KycSessionOut:
+    """Шаг 1: создать сессию у KYC-провайдера. Дальше клиент запускает SDK."""
+    kyc_session = await identity_service.start_session(session, user)
+    payload = kyc_session.payload or {}
+    return KycSessionOut(
+        session_id=kyc_session.id,
+        provider=kyc_session.provider,
+        client_token=payload.get("client_token"),
+        sdk_url=payload.get("sdk_url"),
+        expires_at=kyc_session.expires_at,
+    )
 
 
 @router.post("/identity", response_model=UserOut)
-async def verify_identity(
-    data: IdentityVerifyIn, user: CurrentUser, session: SessionDep, request: Request
+async def confirm_identity(
+    data: IdentityConfirmIn, user: CurrentUser, session: SessionDep, request: Request
 ) -> UserOut:
-    """Подтверждение личности: значок «проверенный» заказчику, уровень 1 исполнителю."""
-    updated = await identity_service.verify_identity(
+    """Шаг 2: подтвердить личность по успешной сессии.
+
+    Результат берётся из сессии, подтверждённой провайдером, — клиент не может
+    объявить себя проверенным.
+    """
+    updated = await identity_service.confirm_identity(
         session,
         user,
-        data.session_token,
+        data.session_id,
         request.client.host if request.client else None,
     )
     return UserOut.model_validate(updated)

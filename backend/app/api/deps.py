@@ -12,13 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AuthError, ForbiddenError
 from app.core.security import TokenError, decode_token
-from app.db.session import get_session
+from app.db.middleware import get_request_session
 from app.models.enums import StaffRole, UserStatus
 from app.models.user import User
 
 _bearer = HTTPBearer(auto_error=False)
 
-SessionDep = Annotated[AsyncSession, Depends(get_session)]
+# Сессию создаёт DatabaseSessionMiddleware — коммит происходит до отправки ответа.
+SessionDep = Annotated[AsyncSession, Depends(get_request_session)]
 
 
 async def get_current_user(

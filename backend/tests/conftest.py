@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from app.db.base import Base
+from app.db.middleware import get_request_session
 from app.db.seed import seed
-from app.db.session import get_session
 from app.main import app
 
 
@@ -44,6 +44,8 @@ async def session_factory():
 
 @pytest_asyncio.fixture()
 async def client(session_factory) -> AsyncGenerator[AsyncClient, None]:
+    # Повторяем контракт DatabaseSessionMiddleware: коммит до отправки ответа,
+    # чтобы тесты видели ту же семантику, что и боевой код.
     async def _override() -> AsyncGenerator[AsyncSession, None]:
         async with session_factory() as session:
             try:
@@ -53,7 +55,7 @@ async def client(session_factory) -> AsyncGenerator[AsyncClient, None]:
                 await session.rollback()
                 raise
 
-    app.dependency_overrides[get_session] = _override
+    app.dependency_overrides[get_request_session] = _override
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as http_client:
         yield http_client

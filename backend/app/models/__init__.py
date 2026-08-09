@@ -5,6 +5,8 @@ from app.models.cancellation import CancellationRule
 from app.models.catalog import Qualification, Service, ServiceCategory
 from app.models.chat import ChatMessage, ChatThread
 from app.models.geo import Address, City, District
+from app.models.kyc import KycSession
+from app.models.messaging import SmsMessage
 from app.models.moderation import AuditLog, Complaint
 from app.models.order import (
     Order,
@@ -54,6 +56,7 @@ __all__ = [
     "District",
     "DocumentAccessLog",
     "Favorite",
+    "KycSession",
     "Order",
     "OrderRecurrence",
     "OrderResponse",
@@ -75,6 +78,7 @@ __all__ = [
     "Review",
     "Service",
     "ServiceCategory",
+    "SmsMessage",
     "User",
     "UserConsent",
     "VerificationDocument",

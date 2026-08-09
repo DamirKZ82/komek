@@ -94,12 +94,17 @@ class Settings(BaseSettings):
     # Пусто → заглушка, которая принимает любую сессию (только вне production).
     kyc_api_url: str | None = None
     kyc_api_key: str | None = None
+    kyc_webhook_secret: str | None = None
+    kyc_webhook_url: str | None = None
+    # Сколько времени даётся на прохождение проверки в мобильном SDK.
+    kyc_session_ttl_minutes: int = 30
     # Минимальный возраст исполнителя (п. 4.1 ТЗ: уровень 1 — 18+).
     min_provider_age: int = 18
 
     # --- SMS-шлюз (п. 5.4 ТЗ) ---
-    # Пусто → сообщения только в лог (local/staging).
-    sms_api_url: str | None = None
+    # log | mobizon | http. Заглушка `log` запрещена в production.
+    sms_provider: str = "log"
+    sms_api_url: str | None = None  # только для провайдера http
     sms_api_key: str | None = None
     sms_sender: str = "Komek"
 

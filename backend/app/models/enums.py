@@ -233,6 +233,26 @@ class ComplaintStatus(StrEnum):
     DISMISSED = "dismissed"
 
 
+class SmsStatus(StrEnum):
+    """Жизненный цикл SMS у провайдера."""
+
+    QUEUED = "queued"  # принято нами, ещё не отправлено
+    SENT = "sent"  # передано провайдеру
+    DELIVERED = "delivered"  # подтверждена доставка на телефон
+    FAILED = "failed"  # провайдер отклонил или не доставил
+    EXPIRED = "expired"  # срок доставки истёк
+
+
+class KycSessionStatus(StrEnum):
+    """Сессия проверки личности у KYC-провайдера (п. 4.2 шаг 3 ТЗ)."""
+
+    CREATED = "created"  # ждём прохождения в мобильном SDK
+    PENDING = "pending"  # пользователь прошёл, провайдер обрабатывает
+    PASSED = "passed"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
 class DevicePlatform(StrEnum):
     IOS = "ios"
     ANDROID = "android"

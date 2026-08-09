@@ -12,7 +12,7 @@ import {
   TextInput,
 } from 'react-native-paper';
 
-import { api, type User } from '@/lib/api';
+import { api, ApiError, type User } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useI18n } from '@/lib/i18n';
 
@@ -47,17 +47,28 @@ export default function ProfileScreen() {
   };
 
   const verifyIdentity = async () => {
-    // Здесь должен запускаться SDK KYC-провайдера (Verigram или аналог) и отдавать
-    // токен сессии. До подключения договора бэкенд принимает dev-токен.
     try {
+      // Шаг 1: бэкенд создаёт сессию у KYC-провайдера.
+      const kyc = await api<{ session_id: string; client_token: string | null }>(
+        '/me/identity/session',
+        { method: 'POST' },
+      );
+
+      // Шаг 2: здесь запускается SDK провайдера с client_token — liveness и съёмка
+      // удостоверения. До подключения договора шаг пропускается: заглушка на бэкенде
+      // сразу помечает сессию пройденной.
+      // TODO(kyc): await VerigramSDK.start(kyc.client_token)
+
+      // Шаг 3: подтверждаем личность по сессии. Результат берётся у провайдера,
+      // клиент не может объявить себя проверенным.
       await api<User>('/me/identity', {
         method: 'POST',
-        body: { session_token: 'stub:900101300123' },
+        body: { session_id: kyc.session_id },
       });
       await refreshUser();
       setSnackbar('✓');
-    } catch {
-      setSnackbar(t('error'));
+    } catch (e) {
+      setSnackbar(e instanceof ApiError ? e.message : t('error'));
     }
   };
 

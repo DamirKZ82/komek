@@ -56,7 +56,12 @@ async def notify_user(
             if sms_fallback:
                 user = await session.get(User, user_id)
                 if user is not None:
-                    await send_sms(user.phone, f"{title}. {body}")
+                    await send_sms(
+                        user.phone,
+                        f"{title}. {body}",
+                        session=session,
+                        purpose="notification",
+                    )
             return
 
         expo_messages = []

@@ -152,7 +152,7 @@ async def test_sms_fallback_on_accept(client, session_factory, monkeypatch):
 
     sent: list[tuple[str, str]] = []
 
-    async def fake_send_sms(phone: str, text: str) -> bool:
+    async def fake_send_sms(phone: str, text: str, **kwargs: object) -> bool:
         sent.append((phone, text))
         return True
 

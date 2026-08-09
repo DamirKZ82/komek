@@ -19,7 +19,7 @@ from app.core.security import (
 from app.models.enums import Locale, OtpPurpose
 from app.models.user import OtpCode, User
 from app.schemas.auth import OtpRequestOut, TokenPair
-from app.services.sms import get_sms_gateway
+from app.services.sms import send_sms
 
 
 class InvalidOtpError(AppError):
@@ -64,7 +64,9 @@ async def request_otp(session: AsyncSession, phone: str, ip: str | None) -> OtpR
             ip_address=ip,
         )
     )
-    await get_sms_gateway().send(phone, f"Komek: код подтверждения {code}")
+    await send_sms(
+        phone, f"Komek: код подтверждения {code}", session=session, purpose="otp"
+    )
 
     return OtpRequestOut(
         expires_in=settings.otp_ttl_seconds,

@@ -20,10 +20,13 @@ from app.api.deps import SessionDep
 from app.core.config import settings
 from app.core.errors import AppError, ForbiddenError
 from app.models.enums import OrderStatus, PaymentStatus
+from app.models.kyc import KycSession
 from app.models.order import Order
 from app.models.payment import Payment
 from app.models.webhook import WebhookEvent
 from app.schemas.common import Ok
+from app.services.identity import apply_result
+from app.services.kyc import get_kyc_provider
 from app.services.notifications import notify_user
 from app.services.orders import transition_to_paid
 
@@ -32,8 +35,14 @@ logger = logging.getLogger("komek.webhooks")
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 
-def _verify_signature(raw_body: bytes, signature: str | None, timestamp: str | None) -> None:
-    secret = settings.payment_webhook_secret
+def _verify_signature(
+    raw_body: bytes,
+    signature: str | None,
+    timestamp: str | None,
+    secret: str | None = None,
+) -> None:
+    if secret is None:
+        secret = settings.payment_webhook_secret
     if not secret:
         if settings.is_production:
             raise ForbiddenError(
@@ -160,5 +169,52 @@ async def payment_webhook(
 
     data = body.get("data") or body.get("object") or body
     await _apply_payment_event(session, event_type, data)
+    event.processed_at = datetime.now(UTC)
+    return Ok()
+
+
+@router.post("/kyc", response_model=Ok)
+async def kyc_webhook(
+    request: Request,
+    session: SessionDep,
+    x_signature: Annotated[str | None, Header(alias="X-Signature")] = None,
+    x_timestamp: Annotated[str | None, Header(alias="X-Timestamp")] = None,
+) -> Ok:
+    """Результат проверки личности от KYC-провайдера (п. 4.2 шаг 3 ТЗ)."""
+    raw_body = await request.body()
+    _verify_signature(raw_body, x_signature, x_timestamp, settings.kyc_webhook_secret)
+
+    try:
+        body = await request.json()
+    except Exception as exc:  # noqa: BLE001
+        raise AppError("Тело вебхука не является JSON", code="webhook_bad_body") from exc
+
+    provider = get_kyc_provider()
+    provider_session_id, result = provider.parse_webhook(body)
+    if not provider_session_id:
+        raise AppError("В событии нет идентификатора сессии", code="webhook_no_session")
+
+    event_id = str(body.get("event_id") or f"kyc-{provider_session_id}-{result.status.value}")
+    existing = await session.scalar(
+        sa.select(WebhookEvent).where(
+            WebhookEvent.source == "kyc", WebhookEvent.event_id == event_id
+        )
+    )
+    if existing is not None:
+        return Ok()
+
+    event = WebhookEvent(
+        source="kyc", event_id=event_id, event_type=result.status.value, payload=body
+    )
+    session.add(event)
+
+    kyc_session = await session.scalar(
+        sa.select(KycSession).where(KycSession.provider_session_id == provider_session_id)
+    )
+    if kyc_session is None:
+        logger.warning("Вебхук по неизвестной KYC-сессии %s", provider_session_id)
+        return Ok()
+
+    await apply_result(session, kyc_session, result)
     event.processed_at = datetime.now(UTC)
     return Ok()
